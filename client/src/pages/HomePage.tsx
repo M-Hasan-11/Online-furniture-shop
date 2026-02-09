@@ -1,19 +1,38 @@
 import { ArrowRight, Truck, ShieldCheck, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ProductCard } from "../components/ProductCard";
+import { CatalogSkeleton } from "../components/Skeletons";
+import { useAuth } from "../contexts/AuthContext";
 import api from "../lib/api";
 import type { Product } from "../lib/types";
 
 const categories = ["All", "Sofas", "Chairs", "Tables", "Beds", "Storage", "Lighting"];
 
 export function HomePage() {
+  const { user } = useAuth();
+  const location = useLocation();
   const [products, setProducts] = useState<Product[]>([]);
+  const [recommendedProducts, setRecommendedProducts] = useState<Product[]>([]);
+  const [recommendationReason, setRecommendationReason] = useState("Popular picks for your home");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [sort, setSort] = useState("featured");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (location.pathname !== "/shop") {
+      return;
+    }
+
+    const scrollTimer = window.setTimeout(() => {
+      const section = document.getElementById("catalog");
+      section?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 70);
+
+    return () => window.clearTimeout(scrollTimer);
+  }, [location.pathname]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -40,6 +59,20 @@ export function HomePage() {
 
     loadProducts();
   }, [search, selectedCategory, sort]);
+
+  useEffect(() => {
+    const loadRecommendations = async () => {
+      try {
+        const { data } = await api.get<{ products: Product[]; reason: string }>("/recommendations");
+        setRecommendedProducts(data.products.slice(0, 4));
+        setRecommendationReason(data.reason || "Popular picks for your home");
+      } catch {
+        setRecommendedProducts([]);
+      }
+    };
+
+    loadRecommendations();
+  }, [user]);
 
   const featuredProducts = useMemo(() => products.filter((item) => item.isFeatured).slice(0, 4), [products]);
 
@@ -127,7 +160,7 @@ export function HomePage() {
           </select>
         </div>
 
-        {loading && <div className="page-state">Loading furniture collection...</div>}
+        {loading && <CatalogSkeleton />}
         {error && <div className="page-state error">{error}</div>}
 
         {!loading && !error && products.length === 0 && (
@@ -154,6 +187,23 @@ export function HomePage() {
           <div className="product-grid">
             {featuredProducts.map((product) => (
               <ProductCard key={`featured-${product.id}`} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recommendedProducts.length > 0 && (
+        <section className="container section feature-section">
+          <div className="section-header">
+            <div>
+              <p className="eyebrow">{user ? "For You" : "Trending"}</p>
+              <h2>{user ? "Recommended For You" : "Popular Right Now"}</h2>
+              <p>{recommendationReason}</p>
+            </div>
+          </div>
+          <div className="product-grid">
+            {recommendedProducts.map((product) => (
+              <ProductCard key={`recommended-${product.id}`} product={product} />
             ))}
           </div>
         </section>

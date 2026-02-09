@@ -63,7 +63,15 @@ export function AccountPage() {
                   <p>{new Date(order.createdAt).toLocaleString()}</p>
                   <p>{order.itemCount} items</p>
                 </div>
-                <div>
+                <div className="order-totals">
+                  <p>Subtotal: ${order.subtotal.toFixed(2)}</p>
+                  <p>Shipping: ${order.shippingFee.toFixed(2)}</p>
+                  {order.discountAmount > 0 && (
+                    <p>
+                      Discount: -${order.discountAmount.toFixed(2)}
+                      {order.couponCode ? ` (${order.couponCode})` : ""}
+                    </p>
+                  )}
                   <p className="order-status">{order.status}</p>
                   <strong>${order.total.toFixed(2)}</strong>
                 </div>
