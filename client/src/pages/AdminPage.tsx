@@ -1,4 +1,4 @@
-﻿import {
+import {
   AlertTriangle,
   BarChart3,
   Clock3,
@@ -7,112 +7,52 @@
   ShoppingCart,
   TicketPercent,
   UsersRound,
+  Search,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import api from "../lib/api";
 import type { AdminOrder, AdminSummary, Coupon, Product } from "../lib/types";
+import { usePageMeta } from "../hooks/usePageMeta";
+import { cn } from "../lib/cn";
 
 const ORDER_STATUSES = ["processing", "shipped", "delivered", "cancelled"] as const;
 type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 const EMPTY_SUMMARY: AdminSummary = {
-  userCount: 0,
-  productCount: 0,
-  couponCount: 0,
-  activeCoupons: 0,
-  orderCount: 0,
-  processingOrders: 0,
-  lowStockProducts: 0,
-  totalRevenue: 0,
+  userCount: 0, productCount: 0, couponCount: 0, activeCoupons: 0,
+  orderCount: 0, processingOrders: 0, lowStockProducts: 0, totalRevenue: 0,
 };
 
-interface SummaryResponse {
-  summary: AdminSummary;
-  recentOrders: AdminOrder[];
-}
+interface SummaryResponse { summary: AdminSummary; recentOrders: AdminOrder[]; }
+interface OrdersResponse { orders: AdminOrder[]; }
+interface ProductsResponse { products: Product[]; }
+interface CouponsResponse { coupons: Coupon[]; }
+interface UpdateOrderResponse { order: AdminOrder; }
+interface ProductResponse { product: Product; }
+interface CouponResponse { coupon: Coupon; }
 
-interface OrdersResponse {
-  orders: AdminOrder[];
-}
-
-interface ProductsResponse {
-  products: Product[];
-}
-
-interface CouponsResponse {
-  coupons: Coupon[];
-}
-
-interface UpdateOrderResponse {
-  order: AdminOrder;
-}
-
-interface ProductResponse {
-  product: Product;
-}
-
-interface CouponResponse {
-  coupon: Coupon;
-}
-
-interface ProductDraft {
-  price: string;
-  stock: string;
-  isFeatured: "0" | "1";
-}
+interface ProductDraft { price: string; stock: string; isFeatured: "0" | "1"; }
 
 interface CreateProductForm {
-  name: string;
-  category: string;
-  price: string;
-  stock: string;
-  image: string;
-  description: string;
-  material: string;
-  dimensions: string;
-  color: string;
-  rating: string;
-  isFeatured: "0" | "1";
+  name: string; category: string; price: string; stock: string; image: string;
+  description: string; material: string; dimensions: string; color: string;
+  rating: string; isFeatured: "0" | "1";
 }
 
 interface CreateCouponForm {
-  code: string;
-  description: string;
-  discountType: "percent" | "fixed";
-  discountValue: string;
-  minOrderAmount: string;
-  expiresAt: string;
-}
-
-interface DashboardMetric {
-  key: string;
-  label: string;
-  value: string;
-  note: string;
-  tone: "brand" | "accent" | "neutral" | "warning";
+  code: string; description: string; discountType: "percent" | "fixed";
+  discountValue: string; minOrderAmount: string; expiresAt: string;
 }
 
 const DEFAULT_PRODUCT_FORM: CreateProductForm = {
-  name: "",
-  category: "Sofas",
-  price: "",
-  stock: "",
-  image: "",
-  description: "",
-  material: "",
-  dimensions: "",
-  color: "",
-  rating: "4.5",
-  isFeatured: "0",
+  name: "", category: "Sofas", price: "", stock: "", image: "", description: "",
+  material: "", dimensions: "", color: "", rating: "4.5", isFeatured: "0",
 };
 
 const DEFAULT_COUPON_FORM: CreateCouponForm = {
-  code: "",
-  description: "",
-  discountType: "percent",
-  discountValue: "",
-  minOrderAmount: "0",
-  expiresAt: "",
+  code: "", description: "", discountType: "percent",
+  discountValue: "", minOrderAmount: "0", expiresAt: "",
 };
 
 function featuredFlag(value: unknown): "0" | "1" {
@@ -121,51 +61,47 @@ function featuredFlag(value: unknown): "0" | "1" {
 
 function buildDrafts(products: Product[]): Record<number, ProductDraft> {
   const drafts: Record<number, ProductDraft> = {};
-
-  for (const product of products) {
-    drafts[product.id] = {
-      price: String(product.price),
-      stock: String(product.stock),
-      isFeatured: featuredFlag(product.isFeatured),
-    };
+  for (const p of products) {
+    drafts[p.id] = { price: String(p.price), stock: String(p.stock), isFeatured: featuredFlag(p.isFeatured) };
   }
-
   return drafts;
 }
 
 function extractApiMessage(error: unknown, fallback: string): string {
   if (
-    error &&
-    typeof error === "object" &&
-    "response" in error &&
-    error.response &&
-    typeof error.response === "object" &&
-    "data" in error.response &&
-    error.response.data &&
-    typeof error.response.data === "object" &&
-    "message" in error.response.data &&
+    error && typeof error === "object" && "response" in error &&
+    error.response && typeof error.response === "object" && "data" in error.response &&
+    error.response.data && typeof error.response.data === "object" && "message" in error.response.data &&
     typeof error.response.data.message === "string"
-  ) {
-    return error.response.data.message;
-  }
-
+  ) return error.response.data.message;
   return fallback;
 }
 
-function formatCurrency(value: number): string {
-  return `$${value.toFixed(2)}`;
+function formatCurrency(v: number) { return `$${v.toFixed(2)}`; }
+function formatStatus(s: string) { return s.charAt(0).toUpperCase() + s.slice(1); }
+function csvEscape(v: unknown) { const t = String(v ?? ""); return `"${t.replace(/"/g, '""')}"`; }
+
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    processing: "status-processing", shipped: "status-shipped",
+    delivered: "status-delivered", cancelled: "status-cancelled",
+    active: "status-delivered", inactive: "status-cancelled",
+  };
+  return (
+    <span className={map[status] ?? "bg-stone text-charcoal-muted border border-warm-gray rounded-full px-2.5 py-0.5 text-xs font-medium"}>
+      {formatStatus(status)}
+    </span>
+  );
 }
 
-function formatStatus(status: string): string {
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
-function csvEscape(value: unknown): string {
-  const text = String(value ?? "");
-  return `"${text.replace(/"/g, '""')}"`;
-}
+const FIELD = "form-input text-xs py-2";
+const LABEL = "form-label text-xs";
+const TH = "text-left eyebrow py-3 px-4 border-b border-warm-gray whitespace-nowrap";
+const TD = "py-3 px-4 text-sm text-charcoal align-middle border-b border-warm-gray/50";
 
 export function AdminPage() {
+  usePageMeta("Admin Dashboard");
+
   const [summary, setSummary] = useState<AdminSummary>(EMPTY_SUMMARY);
   const [recentOrders, setRecentOrders] = useState<AdminOrder[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -176,9 +112,6 @@ export function AdminPage() {
   const [newCoupon, setNewCoupon] = useState<CreateCouponForm>(DEFAULT_COUPON_FORM);
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-
   const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null);
   const [savingProductId, setSavingProductId] = useState<number | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<number | null>(null);
@@ -201,19 +134,15 @@ export function AdminPage() {
   };
 
   useEffect(() => {
-    const loadAdminData = async () => {
+    const load = async () => {
       try {
         setLoading(true);
-        setError(null);
-        setNotice(null);
-
         const [summaryRes, ordersRes, productsRes, couponsRes] = await Promise.all([
           api.get<SummaryResponse>("/admin/summary"),
           api.get<OrdersResponse>("/admin/orders"),
           api.get<ProductsResponse>("/admin/products"),
           api.get<CouponsResponse>("/admin/coupons"),
         ]);
-
         setSummary(summaryRes.data.summary);
         setRecentOrders(summaryRes.data.recentOrders);
         setOrders(ordersRes.data.orders);
@@ -221,463 +150,201 @@ export function AdminPage() {
         setCoupons(couponsRes.data.coupons);
         setProductDrafts(buildDrafts(productsRes.data.products));
       } catch (err) {
-        setError(extractApiMessage(err, "Failed to load admin dashboard. Please login as admin."));
+        toast.error(extractApiMessage(err, "Failed to load admin dashboard."));
       } finally {
         setLoading(false);
       }
     };
-
-    loadAdminData();
+    load();
   }, []);
 
   const sortedProducts = useMemo(() => [...products].sort((a, b) => b.id - a.id), [products]);
 
   const orderStatusCounts = useMemo<Record<OrderStatus, number>>(() => {
-    const counts: Record<OrderStatus, number> = {
-      processing: 0,
-      shipped: 0,
-      delivered: 0,
-      cancelled: 0,
-    };
-
-    for (const order of orders) {
-      if (order.status in counts) {
-        counts[order.status as OrderStatus] += 1;
-      }
-    }
-
-    return counts;
+    const c = { processing: 0, shipped: 0, delivered: 0, cancelled: 0 };
+    for (const o of orders) { if (o.status in c) c[o.status as OrderStatus]++; }
+    return c;
   }, [orders]);
 
-  const averageOrderValue = useMemo(() => {
-    if (summary.orderCount === 0) {
-      return 0;
-    }
+  const averageOrderValue = useMemo(() =>
+    summary.orderCount === 0 ? 0 : summary.totalRevenue / summary.orderCount,
+    [summary.orderCount, summary.totalRevenue]
+  );
 
-    return summary.totalRevenue / summary.orderCount;
-  }, [summary.orderCount, summary.totalRevenue]);
-
-  const couponActivityRate = useMemo(() => {
-    if (summary.couponCount === 0) {
-      return 0;
-    }
-
-    return (summary.activeCoupons / summary.couponCount) * 100;
-  }, [summary.activeCoupons, summary.couponCount]);
-
-  const dashboardMetrics = useMemo<DashboardMetric[]>(
-    () => [
-      {
-        key: "revenue",
-        label: "Revenue",
-        value: formatCurrency(summary.totalRevenue),
-        note: `${summary.orderCount} total orders`,
-        tone: "brand",
-      },
-      {
-        key: "avg-order",
-        label: "Avg. Order",
-        value: formatCurrency(averageOrderValue),
-        note: "Average checkout value",
-        tone: "accent",
-      },
-      {
-        key: "customers",
-        label: "Customers",
-        value: String(summary.userCount),
-        note: `${summary.userCount === 0 ? "No signups yet" : "Registered accounts"}`,
-        tone: "neutral",
-      },
-      {
-        key: "catalog",
-        label: "Catalog",
-        value: String(summary.productCount),
-        note: `${summary.lowStockProducts} low-stock products`,
-        tone: "neutral",
-      },
-      {
-        key: "coupons",
-        label: "Coupons",
-        value: `${summary.activeCoupons}/${summary.couponCount}`,
-        note: `${couponActivityRate.toFixed(1)}% currently active`,
-        tone: "accent",
-      },
-      {
-        key: "queue",
-        label: "Fulfillment",
-        value: String(summary.processingOrders),
-        note: "Orders waiting to ship",
-        tone: "warning",
-      },
-    ],
-    [
-      averageOrderValue,
-      couponActivityRate,
-      summary.activeCoupons,
-      summary.couponCount,
-      summary.lowStockProducts,
-      summary.orderCount,
-      summary.processingOrders,
-      summary.productCount,
-      summary.totalRevenue,
-      summary.userCount,
-    ]
+  const couponActivityRate = useMemo(() =>
+    summary.couponCount === 0 ? 0 : (summary.activeCoupons / summary.couponCount) * 100,
+    [summary.activeCoupons, summary.couponCount]
   );
 
   const lastUpdated = useMemo(
-    () =>
-      new Date().toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }),
+    () => new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [orders.length, products.length, coupons.length, summary.totalRevenue]
   );
 
   const productCategories = useMemo(
-    () => ["all", ...Array.from(new Set(sortedProducts.map((product) => product.category))).sort()],
+    () => ["all", ...Array.from(new Set(sortedProducts.map((p) => p.category))).sort()],
     [sortedProducts]
   );
 
   const filteredOrders = useMemo(() => {
-    const query = orderSearch.trim().toLowerCase();
-
-    return orders.filter((order) => {
-      const matchesStatus = orderStatusFilter === "all" ? true : order.status === orderStatusFilter;
-      if (!matchesStatus) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      return (
-        String(order.id).includes(query) ||
-        order.customerName.toLowerCase().includes(query) ||
-        order.customerEmail.toLowerCase().includes(query) ||
-        (order.couponCode || "").toLowerCase().includes(query)
-      );
+    const q = orderSearch.trim().toLowerCase();
+    return orders.filter((o) => {
+      if (orderStatusFilter !== "all" && o.status !== orderStatusFilter) return false;
+      if (!q) return true;
+      return String(o.id).includes(q) || o.customerName.toLowerCase().includes(q) ||
+        o.customerEmail.toLowerCase().includes(q) || (o.couponCode || "").toLowerCase().includes(q);
     });
   }, [orderSearch, orderStatusFilter, orders]);
 
   const filteredProducts = useMemo(() => {
-    const query = productSearch.trim().toLowerCase();
-
-    return sortedProducts.filter((product) => {
-      const matchesCategory =
-        productCategoryFilter === "all" ? true : product.category === productCategoryFilter;
-      if (!matchesCategory) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      return (
-        String(product.id).includes(query) ||
-        product.name.toLowerCase().includes(query) ||
-        product.category.toLowerCase().includes(query) ||
-        (product.material || "").toLowerCase().includes(query) ||
-        (product.color || "").toLowerCase().includes(query)
-      );
+    const q = productSearch.trim().toLowerCase();
+    return sortedProducts.filter((p) => {
+      if (productCategoryFilter !== "all" && p.category !== productCategoryFilter) return false;
+      if (!q) return true;
+      return String(p.id).includes(q) || p.name.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q) || (p.material || "").toLowerCase().includes(q) ||
+        (p.color || "").toLowerCase().includes(q);
     });
   }, [productCategoryFilter, productSearch, sortedProducts]);
 
   const filteredCoupons = useMemo(() => {
-    const query = couponSearch.trim().toLowerCase();
+    const q = couponSearch.trim().toLowerCase();
     const now = Date.now();
-    const nextTwoWeeks = now + 14 * 24 * 60 * 60 * 1000;
-
-    return coupons.filter((coupon) => {
-      const isActive = Boolean(coupon.isActive);
-      const expiresMs = coupon.expiresAt ? new Date(coupon.expiresAt).getTime() : null;
-      const isExpiringSoon = expiresMs !== null && expiresMs >= now && expiresMs <= nextTwoWeeks;
-
-      const matchesFilter =
-        couponFilter === "all"
-          ? true
-          : couponFilter === "active"
-            ? isActive
-            : couponFilter === "inactive"
-              ? !isActive
-              : isExpiringSoon;
-      if (!matchesFilter) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      return (
-        coupon.code.toLowerCase().includes(query) ||
-        (coupon.description || "").toLowerCase().includes(query)
-      );
+    const twoWeeks = now + 14 * 86400000;
+    return coupons.filter((c) => {
+      const active = Boolean(c.isActive);
+      const expiresMs = c.expiresAt ? new Date(c.expiresAt).getTime() : null;
+      const expiringSoon = expiresMs !== null && expiresMs >= now && expiresMs <= twoWeeks;
+      const matchesFilter = couponFilter === "all" ? true : couponFilter === "active" ? active :
+        couponFilter === "inactive" ? !active : expiringSoon;
+      if (!matchesFilter) return false;
+      if (!q) return true;
+      return c.code.toLowerCase().includes(q) || (c.description || "").toLowerCase().includes(q);
     });
   }, [couponFilter, couponSearch, coupons]);
 
   const exportOrdersCsv = () => {
-    const headers = [
-      "Order ID",
-      "Customer",
-      "Email",
-      "Status",
-      "Items",
-      "Subtotal",
-      "Shipping",
-      "Discount",
-      "Coupon",
-      "Total",
-      "Created At",
-    ];
-
-    const rows = filteredOrders.map((order) => [
-      order.id,
-      order.customerName,
-      order.customerEmail,
-      order.status,
-      order.itemCount,
-      order.subtotal.toFixed(2),
-      order.shippingFee.toFixed(2),
-      order.discountAmount.toFixed(2),
-      order.couponCode || "",
-      order.total.toFixed(2),
-      order.createdAt,
-    ]);
-
-    const csv = [
-      headers.map((header) => csvEscape(header)).join(","),
-      ...rows.map((row) => row.map((value) => csvEscape(value)).join(",")),
-    ].join("\n");
-
+    const headers = ["Order ID","Customer","Email","Status","Items","Subtotal","Shipping","Discount","Coupon","Total","Created At"];
+    const rows = filteredOrders.map((o) => [o.id,o.customerName,o.customerEmail,o.status,o.itemCount,
+      o.subtotal.toFixed(2),o.shippingFee.toFixed(2),o.discountAmount.toFixed(2),o.couponCode||"",o.total.toFixed(2),o.createdAt]);
+    const csv = [headers.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const stamp = new Date().toISOString().slice(0, 10);
-    link.href = url;
-    link.download = `orders-${stamp}.csv`;
-    link.click();
+    const a = document.createElement("a");
+    a.href = url; a.download = `orders-${new Date().toISOString().slice(0,10)}.csv`; a.click();
     URL.revokeObjectURL(url);
-    setNotice(`Exported ${filteredOrders.length} orders to CSV.`);
+    toast.success(`Exported ${filteredOrders.length} orders to CSV.`);
   };
 
   const updateOrderStatus = async (orderId: number, status: string) => {
     try {
       setUpdatingOrderId(orderId);
-      setError(null);
-      setNotice(null);
-
-      const { data } = await api.patch<UpdateOrderResponse>(`/admin/orders/${orderId}/status`, {
-        status,
-      });
-
-      setOrders((prev) => prev.map((order) => (order.id === orderId ? data.order : order)));
-      setRecentOrders((prev) =>
-        prev.map((order) => (order.id === orderId ? { ...order, status: data.order.status } : order))
-      );
-
+      const { data } = await api.patch<UpdateOrderResponse>(`/admin/orders/${orderId}/status`, { status });
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)));
+      setRecentOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: data.order.status } : o)));
       await loadSummary();
-      setNotice(`Order #${orderId} updated to ${status}.`);
+      toast.success(`Order #${orderId} updated to ${status}.`);
     } catch (err) {
-      setError(extractApiMessage(err, "Could not update order status."));
+      toast.error(extractApiMessage(err, "Could not update order status."));
     } finally {
       setUpdatingOrderId(null);
     }
   };
 
-  const updateDraft = (productId: number, field: keyof ProductDraft, value: string) => {
-    setProductDrafts((prev) => ({
-      ...prev,
-      [productId]: {
-        ...prev[productId],
-        [field]: value,
-      },
-    }));
+  const updateDraft = (id: number, field: keyof ProductDraft, value: string) => {
+    setProductDrafts((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
   };
 
   const saveProduct = async (productId: number) => {
     const draft = productDrafts[productId];
-    if (!draft) {
-      return;
-    }
-
-    const price = Number(draft.price);
-    const stock = Number(draft.stock);
-
-    if (!Number.isFinite(price) || price <= 0) {
-      setError("Price must be greater than 0.");
-      return;
-    }
-
-    if (!Number.isInteger(stock) || stock < 0) {
-      setError("Stock must be a whole number >= 0.");
-      return;
-    }
-
+    if (!draft) return;
+    const price = Number(draft.price), stock = Number(draft.stock);
+    if (!Number.isFinite(price) || price <= 0) { toast.error("Price must be > 0."); return; }
+    if (!Number.isInteger(stock) || stock < 0) { toast.error("Stock must be >= 0."); return; }
     try {
       setSavingProductId(productId);
-      setError(null);
-      setNotice(null);
-
       const { data } = await api.patch<ProductResponse>(`/admin/products/${productId}`, {
-        price,
-        stock,
-        isFeatured: draft.isFeatured === "1",
+        price, stock, isFeatured: draft.isFeatured === "1",
       });
-
-      setProducts((prev) => prev.map((item) => (item.id === productId ? data.product : item)));
-      setProductDrafts((prev) => ({
-        ...prev,
-        [productId]: {
-          price: String(data.product.price),
-          stock: String(data.product.stock),
-          isFeatured: featuredFlag(data.product.isFeatured),
-        },
-      }));
-
+      setProducts((prev) => prev.map((p) => (p.id === productId ? data.product : p)));
+      setProductDrafts((prev) => ({ ...prev, [productId]: {
+        price: String(data.product.price), stock: String(data.product.stock),
+        isFeatured: featuredFlag(data.product.isFeatured),
+      }}));
       await loadSummary();
-      setNotice(`Saved updates for ${data.product.name}.`);
+      toast.success(`Saved ${data.product.name}.`);
     } catch (err) {
-      setError(extractApiMessage(err, "Could not update product."));
+      toast.error(extractApiMessage(err, "Could not update product."));
     } finally {
       setSavingProductId(null);
     }
   };
 
   const deleteProduct = async (productId: number) => {
-    const target = products.find((item) => item.id === productId);
-    if (!target) {
-      return;
-    }
-
-    if (!window.confirm(`Delete "${target.name}"? This cannot be undone.`)) {
-      return;
-    }
-
+    const target = products.find((p) => p.id === productId);
+    if (!target) return;
+    if (!window.confirm(`Delete "${target.name}"? This cannot be undone.`)) return;
     try {
       setDeletingProductId(productId);
-      setError(null);
-      setNotice(null);
-
       await api.delete(`/admin/products/${productId}`);
-      setProducts((prev) => prev.filter((item) => item.id !== productId));
-      setProductDrafts((prev) => {
-        const next = { ...prev };
-        delete next[productId];
-        return next;
-      });
-
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      setProductDrafts((prev) => { const n = { ...prev }; delete n[productId]; return n; });
       await loadSummary();
-      setNotice(`Deleted ${target.name}.`);
+      toast.success(`Deleted ${target.name}.`);
     } catch (err) {
-      setError(extractApiMessage(err, "Could not delete product."));
+      toast.error(extractApiMessage(err, "Could not delete product."));
     } finally {
       setDeletingProductId(null);
     }
   };
 
-  const createProduct = async (event: React.FormEvent) => {
-    event.preventDefault();
-
-    const price = Number(newProduct.price);
-    const stock = Number(newProduct.stock);
-    const rating = Number(newProduct.rating || 0);
-
-    if (!Number.isFinite(price) || price <= 0) {
-      setError("New product price must be greater than 0.");
-      return;
-    }
-
-    if (!Number.isInteger(stock) || stock < 0) {
-      setError("New product stock must be a whole number >= 0.");
-      return;
-    }
-
-    if (!Number.isFinite(rating) || rating < 0 || rating > 5) {
-      setError("Rating must be between 0 and 5.");
-      return;
-    }
-
+  const createProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const price = Number(newProduct.price), stock = Number(newProduct.stock), rating = Number(newProduct.rating || 0);
+    if (!Number.isFinite(price) || price <= 0) { toast.error("Price must be > 0."); return; }
+    if (!Number.isInteger(stock) || stock < 0) { toast.error("Stock must be >= 0."); return; }
+    if (!Number.isFinite(rating) || rating < 0 || rating > 5) { toast.error("Rating must be 0–5."); return; }
     try {
       setCreatingProduct(true);
-      setError(null);
-      setNotice(null);
-
       const { data } = await api.post<ProductResponse>("/admin/products", {
-        ...newProduct,
-        price,
-        stock,
-        rating,
-        isFeatured: newProduct.isFeatured === "1",
+        ...newProduct, price, stock, rating, isFeatured: newProduct.isFeatured === "1",
       });
-
       setProducts((prev) => [data.product, ...prev]);
-      setProductDrafts((prev) => ({
-        ...prev,
-        [data.product.id]: {
-          price: String(data.product.price),
-          stock: String(data.product.stock),
-          isFeatured: featuredFlag(data.product.isFeatured),
-        },
-      }));
+      setProductDrafts((prev) => ({ ...prev, [data.product.id]: {
+        price: String(data.product.price), stock: String(data.product.stock),
+        isFeatured: featuredFlag(data.product.isFeatured),
+      }}));
       setNewProduct(DEFAULT_PRODUCT_FORM);
-
       await loadSummary();
-      setNotice(`Created ${data.product.name}.`);
+      toast.success(`Created ${data.product.name}.`);
     } catch (err) {
-      setError(extractApiMessage(err, "Could not create product."));
+      toast.error(extractApiMessage(err, "Could not create product."));
     } finally {
       setCreatingProduct(false);
     }
   };
 
-  const createCoupon = async (event: React.FormEvent) => {
-    event.preventDefault();
-
-    const discountValue = Number(newCoupon.discountValue);
-    const minOrderAmount = Number(newCoupon.minOrderAmount);
-
-    if (!newCoupon.code.trim()) {
-      setError("Coupon code is required.");
-      return;
-    }
-
-    if (!Number.isFinite(discountValue) || discountValue <= 0) {
-      setError("Discount value must be greater than 0.");
-      return;
-    }
-
-    if (newCoupon.discountType === "percent" && discountValue > 100) {
-      setError("Percent discount cannot exceed 100.");
-      return;
-    }
-
-    if (!Number.isFinite(minOrderAmount) || minOrderAmount < 0) {
-      setError("Minimum order must be >= 0.");
-      return;
-    }
-
+  const createCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const discountValue = Number(newCoupon.discountValue), minOrderAmount = Number(newCoupon.minOrderAmount);
+    if (!newCoupon.code.trim()) { toast.error("Coupon code is required."); return; }
+    if (!Number.isFinite(discountValue) || discountValue <= 0) { toast.error("Discount must be > 0."); return; }
+    if (newCoupon.discountType === "percent" && discountValue > 100) { toast.error("Percent cannot exceed 100."); return; }
+    if (!Number.isFinite(minOrderAmount) || minOrderAmount < 0) { toast.error("Min order must be >= 0."); return; }
     try {
       setCreatingCoupon(true);
-      setError(null);
-      setNotice(null);
-
       const { data } = await api.post<CouponResponse>("/admin/coupons", {
-        code: newCoupon.code,
-        description: newCoupon.description || null,
-        discountType: newCoupon.discountType,
-        discountValue,
-        minOrderAmount,
+        code: newCoupon.code, description: newCoupon.description || null,
+        discountType: newCoupon.discountType, discountValue, minOrderAmount,
         expiresAt: newCoupon.expiresAt || null,
       });
-
       setCoupons((prev) => [data.coupon, ...prev]);
       setNewCoupon(DEFAULT_COUPON_FORM);
       await loadSummary();
-      setNotice(`Created coupon ${data.coupon.code}.`);
+      toast.success(`Created coupon ${data.coupon.code}.`);
     } catch (err) {
-      setError(extractApiMessage(err, "Could not create coupon."));
+      toast.error(extractApiMessage(err, "Could not create coupon."));
     } finally {
       setCreatingCoupon(false);
     }
@@ -686,247 +353,172 @@ export function AdminPage() {
   const toggleCouponStatus = async (coupon: Coupon) => {
     try {
       setSavingCouponId(coupon.id);
-      setError(null);
-      setNotice(null);
-
       const { data } = await api.patch<CouponResponse>(`/admin/coupons/${coupon.id}`, {
         isActive: coupon.isActive ? 0 : 1,
       });
-
-      setCoupons((prev) => prev.map((item) => (item.id === coupon.id ? data.coupon : item)));
+      setCoupons((prev) => prev.map((c) => (c.id === coupon.id ? data.coupon : c)));
       await loadSummary();
-      setNotice(`${data.coupon.code} is now ${data.coupon.isActive ? "active" : "inactive"}.`);
+      toast.success(`${data.coupon.code} is now ${data.coupon.isActive ? "active" : "inactive"}.`);
     } catch (err) {
-      setError(extractApiMessage(err, "Could not update coupon."));
+      toast.error(extractApiMessage(err, "Could not update coupon."));
     } finally {
       setSavingCouponId(null);
     }
   };
 
   const deleteCoupon = async (coupon: Coupon) => {
-    if (!window.confirm(`Delete coupon ${coupon.code}?`)) {
-      return;
-    }
-
+    if (!window.confirm(`Delete coupon ${coupon.code}?`)) return;
     try {
       setDeletingCouponId(coupon.id);
-      setError(null);
-      setNotice(null);
-
       await api.delete(`/admin/coupons/${coupon.id}`);
-      setCoupons((prev) => prev.filter((item) => item.id !== coupon.id));
+      setCoupons((prev) => prev.filter((c) => c.id !== coupon.id));
       await loadSummary();
-      setNotice(`Deleted coupon ${coupon.code}.`);
+      toast.success(`Deleted coupon ${coupon.code}.`);
     } catch (err) {
-      setError(extractApiMessage(err, "Could not delete coupon."));
+      toast.error(extractApiMessage(err, "Could not delete coupon."));
     } finally {
       setDeletingCouponId(null);
     }
   };
 
+  /* ── KPI data ── */
+  const kpis = [
+    { label: "Revenue", value: formatCurrency(summary.totalRevenue), note: `${summary.orderCount} total orders`, accent: false },
+    { label: "Avg. Order", value: formatCurrency(averageOrderValue), note: "Average checkout value", accent: true },
+    { label: "Customers", value: String(summary.userCount), note: "Registered accounts", accent: false },
+    { label: "Catalog", value: String(summary.productCount), note: `${summary.lowStockProducts} low-stock`, accent: false },
+    { label: "Coupons", value: `${summary.activeCoupons}/${summary.couponCount}`, note: `${couponActivityRate.toFixed(1)}% active`, accent: true },
+    { label: "Fulfillment", value: String(summary.processingOrders), note: "Orders to ship", accent: summary.processingOrders > 0 },
+  ];
+
   return (
-    <section className="container section">
-      <div className="admin-dashboard-hero reveal">
-        <div>
-          <p className="eyebrow">Admin Dashboard</p>
-          <h1>Modern Store Control Center</h1>
-          <p className="admin-hero-copy">
-            Monitor sales health, fulfillment progress, inventory, and promotions in real time.
-          </p>
-        </div>
-        <div className="admin-hero-meta">
-          <div className="admin-meta-chip">
-            <Clock3 size={15} />
-            Updated {lastUpdated}
-          </div>
-          <div className="admin-meta-chip">
-            <BarChart3 size={15} />
-            {summary.processingOrders} orders in active pipeline
-          </div>
+    <div className="section">
+      {/* Header */}
+      <div className="mb-10">
+        <p className="eyebrow mb-1">Admin Dashboard</p>
+        <h1 className="font-serif text-[clamp(1.8rem,3vw,2.6rem)] text-charcoal tracking-tight mb-2">
+          Store Control Center
+        </h1>
+        <div className="flex flex-wrap gap-3 text-xs text-charcoal-muted">
+          <span className="flex items-center gap-1.5"><Clock3 size={12} />Updated {lastUpdated}</span>
+          <span className="flex items-center gap-1.5"><BarChart3 size={12} />{summary.processingOrders} orders in pipeline</span>
         </div>
       </div>
 
-      {error && <div className="page-state error admin-alert">{error}</div>}
-      {notice && <div className="page-state admin-alert">{notice}</div>}
-
-      <div className="admin-kpi-grid reveal">
-        {dashboardMetrics.map((metric) => (
-          <article className={`admin-kpi-card tone-${metric.tone}`} key={metric.key}>
-            <span className="admin-kpi-label">{metric.label}</span>
-            <strong className="admin-kpi-value">{metric.value}</strong>
-            <p className="admin-kpi-note">{metric.note}</p>
-          </article>
+      {/* KPI grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-10">
+        {kpis.map((k) => (
+          <div key={k.label} className={cn("card p-4 flex flex-col gap-1", k.accent && "border-gold/30 bg-gold/5")}>
+            <p className="eyebrow">{k.label}</p>
+            <p className="font-serif text-2xl text-charcoal">{k.value}</p>
+            <p className="text-xs text-charcoal-muted">{k.note}</p>
+          </div>
         ))}
       </div>
 
-      <div className="admin-insight-grid reveal">
-        <article className="admin-panel admin-insight-panel">
-          <div className="admin-panel-heading">
-            <h2>Pipeline</h2>
-            <p className="admin-panel-subtitle">Order status distribution</p>
+      {/* Pipeline + glance */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+        <div className="card p-5">
+          <h2 className="font-serif text-lg text-charcoal mb-4">Order Pipeline</h2>
+          <div className="grid grid-cols-2 gap-3">
+            {(["processing","shipped","delivered","cancelled"] as OrderStatus[]).map((s) => (
+              <div key={s} className="flex items-center justify-between bg-stone rounded-xl px-3 py-2.5">
+                <StatusPill status={s} />
+                <span className="font-serif text-lg text-charcoal">{orderStatusCounts[s]}</span>
+              </div>
+            ))}
           </div>
+        </div>
 
-          <div className="admin-status-overview">
-            <div className="admin-status-item">
-              <span className="admin-status-pill status-processing">Processing</span>
-              <strong>{orderStatusCounts.processing}</strong>
-            </div>
-            <div className="admin-status-item">
-              <span className="admin-status-pill status-shipped">Shipped</span>
-              <strong>{orderStatusCounts.shipped}</strong>
-            </div>
-            <div className="admin-status-item">
-              <span className="admin-status-pill status-delivered">Delivered</span>
-              <strong>{orderStatusCounts.delivered}</strong>
-            </div>
-            <div className="admin-status-item">
-              <span className="admin-status-pill status-cancelled">Cancelled</span>
-              <strong>{orderStatusCounts.cancelled}</strong>
-            </div>
-          </div>
-        </article>
-
-        <article className="admin-panel admin-insight-panel">
-          <div className="admin-panel-heading">
-            <h2>At a Glance</h2>
-            <p className="admin-panel-subtitle">Critical operating signals</p>
-          </div>
-
-          <div className="admin-glance-list">
-            <div className="admin-glance-item">
-              <DollarSign size={15} />
-              <span>{formatCurrency(summary.totalRevenue)} lifetime revenue</span>
-            </div>
-            <div className="admin-glance-item">
-              <ShoppingCart size={15} />
-              <span>{summary.orderCount} total orders processed</span>
-            </div>
-            <div className="admin-glance-item">
-              <UsersRound size={15} />
-              <span>{summary.userCount} registered customers</span>
-            </div>
-            <div className="admin-glance-item">
-              <TicketPercent size={15} />
-              <span>{summary.activeCoupons} active promotions</span>
-            </div>
-            <div className="admin-glance-item">
-              <AlertTriangle size={15} />
-              <span>{summary.lowStockProducts} products at or below 5 units</span>
-            </div>
-          </div>
-        </article>
+        <div className="card p-5">
+          <h2 className="font-serif text-lg text-charcoal mb-4">At a Glance</h2>
+          <ul className="flex flex-col gap-2.5 text-sm text-charcoal-muted">
+            {[
+              { icon: <DollarSign size={13} />, text: `${formatCurrency(summary.totalRevenue)} lifetime revenue` },
+              { icon: <ShoppingCart size={13} />, text: `${summary.orderCount} total orders processed` },
+              { icon: <UsersRound size={13} />, text: `${summary.userCount} registered customers` },
+              { icon: <TicketPercent size={13} />, text: `${summary.activeCoupons} active promotions` },
+              { icon: <AlertTriangle size={13} />, text: `${summary.lowStockProducts} products at low stock` },
+            ].map(({ icon, text }) => (
+              <li key={text} className="flex items-center gap-2.5">
+                <span className="text-gold shrink-0">{icon}</span>{text}
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
 
-      <div className="admin-grid">
-        <article className="admin-panel reveal">
-          <div className="admin-panel-heading">
-            <h2>Recent Orders</h2>
-            <p className="admin-panel-subtitle">Latest checkout activity</p>
-          </div>
-          {loading && <div className="page-state">Loading orders...</div>}
-
-          {!loading && recentOrders.length === 0 && <div className="page-state">No orders yet.</div>}
-
+      {/* Recent + Manage orders */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
+        {/* Recent orders */}
+        <div className="card p-5">
+          <h2 className="font-serif text-lg text-charcoal mb-4">Recent Orders</h2>
+          {loading && <p className="text-sm text-charcoal-muted">Loading…</p>}
+          {!loading && recentOrders.length === 0 && <p className="text-sm text-charcoal-muted">No orders yet.</p>}
           {!loading && recentOrders.length > 0 && (
-            <div className="orders-list">
-              {recentOrders.map((order) => (
-                <article className="order-card" key={`recent-${order.id}`}>
+            <div className="flex flex-col divide-y divide-warm-gray">
+              {recentOrders.map((o) => (
+                <div key={`rec-${o.id}`} className="flex items-center justify-between py-3 gap-3">
                   <div>
-                    <p className="order-id">
-                      #{order.id} - {order.customerName}
-                    </p>
-                    <p>{new Date(order.createdAt).toLocaleString()}</p>
-                    <p>{order.itemCount} items</p>
+                    <p className="text-sm font-medium text-charcoal">#{o.id} — {o.customerName}</p>
+                    <p className="text-xs text-charcoal-muted">{new Date(o.createdAt).toLocaleDateString()} · {o.itemCount} items</p>
                   </div>
-                  <div className="order-totals">
-                    <p className={`admin-status-pill status-${order.status}`}>{formatStatus(order.status)}</p>
-                    <strong>{formatCurrency(order.total)}</strong>
+                  <div className="flex flex-col items-end gap-1">
+                    <StatusPill status={o.status} />
+                    <span className="text-sm font-medium text-charcoal">{formatCurrency(o.total)}</span>
                   </div>
-                </article>
+                </div>
               ))}
             </div>
           )}
-        </article>
+        </div>
 
-        <article className="admin-panel reveal">
-          <div className="admin-panel-heading">
-            <h2>Manage Orders</h2>
-            <p className="admin-panel-subtitle">Update delivery workflow</p>
-          </div>
-
-          <div className="admin-toolbar">
-            <input
-              className="search-input"
-              placeholder="Search order, customer, email, coupon"
-              value={orderSearch}
-              onChange={(event) => setOrderSearch(event.target.value)}
-            />
-            <select
-              className="select"
-              value={orderStatusFilter}
-              onChange={(event) => setOrderStatusFilter(event.target.value as "all" | OrderStatus)}
-            >
-              <option value="all">All statuses</option>
-              {ORDER_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {formatStatus(status)}
-                </option>
-              ))}
-            </select>
-            <button className="btn btn-secondary btn-small" type="button" onClick={exportOrdersCsv}>
-              <Download size={14} />
-              Export CSV
+        {/* Manage orders */}
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-serif text-lg text-charcoal">Manage Orders</h2>
+            <button onClick={exportOrdersCsv} className="btn-outline px-3 py-2 text-xs flex items-center gap-1.5">
+              <Download size={12} />CSV
             </button>
           </div>
-
-          {filteredOrders.length === 0 && <div className="page-state">No orders match your filters.</div>}
-
+          <div className="flex gap-2 mb-4">
+            <div className="relative flex-1">
+              <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-light pointer-events-none" />
+              <input className={cn(FIELD, "pl-8")} placeholder="Search orders…" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
+            </div>
+            <select className={cn(FIELD, "w-36")} value={orderStatusFilter} onChange={(e) => setOrderStatusFilter(e.target.value as "all" | OrderStatus)}>
+              <option value="all">All</option>
+              {ORDER_STATUSES.map((s) => <option key={s} value={s}>{formatStatus(s)}</option>)}
+            </select>
+          </div>
+          {filteredOrders.length === 0 && <p className="text-sm text-charcoal-muted">No orders match filters.</p>}
           {filteredOrders.length > 0 && (
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Customer</th>
-                    <th>Total</th>
-                    <th>Current</th>
-                    <th>Update</th>
-                  </tr>
-                </thead>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr><th className={TH}>Order</th><th className={TH}>Customer</th><th className={TH}>Total</th><th className={TH}>Update</th></tr></thead>
                 <tbody>
-                  {filteredOrders.map((order) => (
-                    <tr key={order.id}>
-                      <td>
-                        #{order.id}
-                        <br />
-                        <small>{new Date(order.createdAt).toLocaleDateString()}</small>
+                  {filteredOrders.map((o) => (
+                    <tr key={o.id} className="hover:bg-stone/50">
+                      <td className={TD}>
+                        <span className="font-medium">#{o.id}</span>
+                        <br /><span className="text-xs text-charcoal-muted">{new Date(o.createdAt).toLocaleDateString()}</span>
                       </td>
-                      <td>
-                        {order.customerName}
-                        <br />
-                        <small>{order.customerEmail}</small>
+                      <td className={TD}>
+                        {o.customerName}
+                        <br /><span className="text-xs text-charcoal-muted">{o.customerEmail}</span>
                       </td>
-                      <td>
-                        {formatCurrency(order.total)}
-                        {order.couponCode ? <small> ({order.couponCode})</small> : null}
+                      <td className={TD}>
+                        {formatCurrency(o.total)}
+                        {o.couponCode && <span className="text-xs text-charcoal-muted ml-1">({o.couponCode})</span>}
                       </td>
-                      <td>
-                        <span className={`admin-status-pill status-${order.status}`}>
-                          {formatStatus(order.status)}
-                        </span>
-                      </td>
-                      <td>
+                      <td className={TD}>
                         <select
-                          className="select admin-status-select"
-                          value={order.status}
-                          onChange={(event) => updateOrderStatus(order.id, event.target.value)}
-                          disabled={updatingOrderId === order.id}
+                          className={cn(FIELD, "w-32")}
+                          value={o.status}
+                          onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+                          disabled={updatingOrderId === o.id}
                         >
-                          {ORDER_STATUSES.map((status) => (
-                            <option key={status} value={status}>
-                              {formatStatus(status)}
-                            </option>
-                          ))}
+                          {ORDER_STATUSES.map((s) => <option key={s} value={s}>{formatStatus(s)}</option>)}
                         </select>
                       </td>
                     </tr>
@@ -935,244 +527,85 @@ export function AdminPage() {
               </table>
             </div>
           )}
-        </article>
+        </div>
       </div>
 
-      <article className="admin-panel admin-panel-full reveal">
-        <div className="admin-panel-heading">
-          <h2>Catalog Management</h2>
-          <p className="admin-panel-subtitle">Create, update, and curate products for storefront discovery</p>
-        </div>
+      {/* Catalog management */}
+      <div className="card p-6 mb-8">
+        <h2 className="font-serif text-xl text-charcoal mb-6">Catalog Management</h2>
 
-        <form className="admin-form-grid" onSubmit={createProduct}>
-          <label>
-            Product Name
-            <input
-              value={newProduct.name}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, name: event.target.value }))}
-              required
-            />
-          </label>
-
-          <label>
-            Category
-            <input
-              value={newProduct.category}
-              onChange={(event) =>
-                setNewProduct((prev) => ({ ...prev, category: event.target.value }))
-              }
-              required
-            />
-          </label>
-
-          <label>
-            Price
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              value={newProduct.price}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, price: event.target.value }))}
-              required
-            />
-          </label>
-
-          <label>
-            Stock
-            <input
-              type="number"
-              step="1"
-              min="0"
-              value={newProduct.stock}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, stock: event.target.value }))}
-              required
-            />
-          </label>
-
-          <label>
-            Image URL
-            <input
-              value={newProduct.image}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, image: event.target.value }))}
-              required
-            />
-          </label>
-
-          <label>
-            Rating
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              max="5"
-              value={newProduct.rating}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, rating: event.target.value }))}
-            />
-          </label>
-
-          <label>
-            Material
-            <input
-              value={newProduct.material}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, material: event.target.value }))}
-            />
-          </label>
-
-          <label>
-            Dimensions
-            <input
-              value={newProduct.dimensions}
-              onChange={(event) =>
-                setNewProduct((prev) => ({ ...prev, dimensions: event.target.value }))
-              }
-            />
-          </label>
-
-          <label>
-            Color
-            <input
-              value={newProduct.color}
-              onChange={(event) => setNewProduct((prev) => ({ ...prev, color: event.target.value }))}
-            />
-          </label>
-
-          <label>
-            Featured
-            <select
-              className="select"
-              value={newProduct.isFeatured}
-              onChange={(event) =>
-                setNewProduct((prev) => ({
-                  ...prev,
-                  isFeatured: event.target.value as "0" | "1",
-                }))
-              }
-            >
-              <option value="0">No</option>
-              <option value="1">Yes</option>
+        <form onSubmit={createProduct} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+          {[
+            { label: "Name", field: "name", type: "text", required: true },
+            { label: "Category", field: "category", type: "text", required: true },
+            { label: "Price", field: "price", type: "number", step: "0.01", min: "0.01", required: true },
+            { label: "Stock", field: "stock", type: "number", step: "1", min: "0", required: true },
+            { label: "Image URL", field: "image", type: "text", required: true },
+            { label: "Rating", field: "rating", type: "number", step: "0.1", min: "0", max: "5" },
+            { label: "Material", field: "material", type: "text" },
+            { label: "Dimensions", field: "dimensions", type: "text" },
+            { label: "Color", field: "color", type: "text" },
+          ].map(({ label, field, ...rest }) => (
+            <div key={field}>
+              <label className={LABEL}>{label}</label>
+              <input
+                className={FIELD}
+                value={newProduct[field as keyof CreateProductForm] as string}
+                onChange={(e) => setNewProduct((p) => ({ ...p, [field]: e.target.value }))}
+                {...rest}
+              />
+            </div>
+          ))}
+          <div>
+            <label className={LABEL}>Featured</label>
+            <select className={FIELD} value={newProduct.isFeatured} onChange={(e) => setNewProduct((p) => ({ ...p, isFeatured: e.target.value as "0"|"1" }))}>
+              <option value="0">No</option><option value="1">Yes</option>
             </select>
-          </label>
-
-          <label className="admin-full-span">
-            Description
-            <textarea
-              rows={3}
-              value={newProduct.description}
-              onChange={(event) =>
-                setNewProduct((prev) => ({ ...prev, description: event.target.value }))
-              }
-              required
-            />
-          </label>
-
-          <div className="admin-form-actions admin-full-span">
-            <button className="btn" type="submit" disabled={creatingProduct}>
-              {creatingProduct ? "Creating product..." : "Add Product"}
+          </div>
+          <div className="col-span-2 sm:col-span-3 lg:col-span-5">
+            <label className={LABEL}>Description</label>
+            <textarea className={cn(FIELD, "resize-none")} rows={2} value={newProduct.description} onChange={(e) => setNewProduct((p) => ({ ...p, description: e.target.value }))} required />
+          </div>
+          <div className="col-span-2 sm:col-span-3 lg:col-span-5">
+            <button type="submit" disabled={creatingProduct} className="btn-primary text-xs px-5 py-2.5">
+              {creatingProduct ? "Creating…" : "Add Product"}
             </button>
           </div>
         </form>
 
-        <div className="admin-toolbar">
-          <input
-            className="search-input"
-            placeholder="Search product by name, id, category, material, color"
-            value={productSearch}
-            onChange={(event) => setProductSearch(event.target.value)}
-          />
-          <select
-            className="select"
-            value={productCategoryFilter}
-            onChange={(event) => setProductCategoryFilter(event.target.value)}
-          >
-            {productCategories.map((category) => (
-              <option key={category} value={category}>
-                {category === "all" ? "All categories" : category}
-              </option>
-            ))}
+        <div className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-light pointer-events-none" />
+            <input className={cn(FIELD, "pl-8")} placeholder="Search products…" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} />
+          </div>
+          <select className={cn(FIELD, "w-40")} value={productCategoryFilter} onChange={(e) => setProductCategoryFilter(e.target.value)}>
+            {productCategories.map((c) => <option key={c} value={c}>{c === "all" ? "All categories" : c}</option>)}
           </select>
         </div>
 
-        {filteredProducts.length === 0 && <div className="page-state">No products match your filters.</div>}
-
+        {filteredProducts.length === 0 && <p className="text-sm text-charcoal-muted">No products match filters.</p>}
         {filteredProducts.length > 0 && (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Category</th>
-                  <th>Price</th>
-                  <th>Stock</th>
-                  <th>Featured</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr><th className={TH}>Product</th><th className={TH}>Category</th><th className={TH}>Price</th><th className={TH}>Stock</th><th className={TH}>Featured</th><th className={TH}>Actions</th></tr></thead>
               <tbody>
-                {filteredProducts.map((product) => {
-                  const draft = productDrafts[product.id] || {
-                    price: String(product.price),
-                    stock: String(product.stock),
-                    isFeatured: featuredFlag(product.isFeatured),
-                  };
-
+                {filteredProducts.map((p) => {
+                  const d = productDrafts[p.id] || { price: String(p.price), stock: String(p.stock), isFeatured: featuredFlag(p.isFeatured) };
                   return (
-                    <tr key={product.id}>
-                      <td>
-                        {product.name}
-                        <br />
-                        <small>#{product.id}</small>
-                      </td>
-                      <td>{product.category}</td>
-                      <td>
-                        <input
-                          className="admin-inline-input"
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          value={draft.price}
-                          onChange={(event) => updateDraft(product.id, "price", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="admin-inline-input"
-                          type="number"
-                          step="1"
-                          min="0"
-                          value={draft.stock}
-                          onChange={(event) => updateDraft(product.id, "stock", event.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          className="select"
-                          value={draft.isFeatured}
-                          onChange={(event) =>
-                            updateDraft(product.id, "isFeatured", event.target.value as "0" | "1")
-                          }
-                        >
-                          <option value="0">No</option>
-                          <option value="1">Yes</option>
+                    <tr key={p.id} className="hover:bg-stone/50">
+                      <td className={TD}><span className="font-medium">{p.name}</span><br /><span className="text-xs text-charcoal-muted">#{p.id}</span></td>
+                      <td className={TD}>{p.category}</td>
+                      <td className={TD}><input className={cn(FIELD, "w-24")} type="number" step="0.01" min="0.01" value={d.price} onChange={(e) => updateDraft(p.id, "price", e.target.value)} /></td>
+                      <td className={TD}><input className={cn(FIELD, "w-20")} type="number" step="1" min="0" value={d.stock} onChange={(e) => updateDraft(p.id, "stock", e.target.value)} /></td>
+                      <td className={TD}>
+                        <select className={cn(FIELD, "w-16")} value={d.isFeatured} onChange={(e) => updateDraft(p.id, "isFeatured", e.target.value as "0"|"1")}>
+                          <option value="0">No</option><option value="1">Yes</option>
                         </select>
                       </td>
-                      <td>
-                        <div className="admin-row-actions">
-                          <button
-                            className="btn btn-small"
-                            type="button"
-                            onClick={() => saveProduct(product.id)}
-                            disabled={savingProductId === product.id}
-                          >
-                            {savingProductId === product.id ? "Saving..." : "Save"}
-                          </button>
-                          <button
-                            className="btn btn-secondary btn-small"
-                            type="button"
-                            onClick={() => deleteProduct(product.id)}
-                            disabled={deletingProductId === product.id}
-                          >
-                            {deletingProductId === product.id ? "Deleting..." : "Delete"}
-                          </button>
+                      <td className={TD}>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => saveProduct(p.id)} disabled={savingProductId === p.id} className="btn-primary px-3 py-1.5 text-xs">{savingProductId === p.id ? "…" : "Save"}</button>
+                          <button onClick={() => deleteProduct(p.id)} disabled={deletingProductId === p.id} className="btn-outline px-3 py-1.5 text-xs text-error border-error/30 hover:border-error">{deletingProductId === p.id ? "…" : "Delete"}</button>
                         </div>
                       </td>
                     </tr>
@@ -1182,175 +615,74 @@ export function AdminPage() {
             </table>
           </div>
         )}
-      </article>
+      </div>
 
-      <article className="admin-panel admin-panel-full reveal">
-        <div className="admin-panel-heading">
-          <h2>Coupon Management</h2>
-          <p className="admin-panel-subtitle">Launch, pause, and retire discount campaigns</p>
-        </div>
+      {/* Coupon management */}
+      <div className="card p-6">
+        <h2 className="font-serif text-xl text-charcoal mb-6">Coupon Management</h2>
 
-        <form className="admin-form-grid" onSubmit={createCoupon}>
-          <label>
-            Code
-            <input
-              value={newCoupon.code}
-              onChange={(event) =>
-                setNewCoupon((prev) => ({ ...prev, code: event.target.value.toUpperCase() }))
-              }
-              required
-            />
-          </label>
-
-          <label>
-            Discount Type
-            <select
-              className="select"
-              value={newCoupon.discountType}
-              onChange={(event) =>
-                setNewCoupon((prev) => ({
-                  ...prev,
-                  discountType: event.target.value as "percent" | "fixed",
-                }))
-              }
-            >
-              <option value="percent">Percent</option>
-              <option value="fixed">Fixed Amount</option>
+        <form onSubmit={createCoupon} className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+          {[
+            { label: "Code", field: "code", type: "text", required: true },
+            { label: "Discount Value", field: "discountValue", type: "number", step: "0.01", min: "0.01", required: true },
+            { label: "Min Order", field: "minOrderAmount", type: "number", step: "0.01", min: "0" },
+            { label: "Expires At", field: "expiresAt", type: "date" },
+          ].map(({ label, field, ...rest }) => (
+            <div key={field}>
+              <label className={LABEL}>{label}</label>
+              <input
+                className={FIELD}
+                value={newCoupon[field as keyof CreateCouponForm] as string}
+                onChange={(e) => setNewCoupon((c) => ({ ...c, [field]: field === "code" ? e.target.value.toUpperCase() : e.target.value }))}
+                {...rest}
+              />
+            </div>
+          ))}
+          <div>
+            <label className={LABEL}>Type</label>
+            <select className={FIELD} value={newCoupon.discountType} onChange={(e) => setNewCoupon((c) => ({ ...c, discountType: e.target.value as "percent"|"fixed" }))}>
+              <option value="percent">Percent %</option><option value="fixed">Fixed $</option>
             </select>
-          </label>
-
-          <label>
-            Discount Value
-            <input
-              type="number"
-              step="0.01"
-              min="0.01"
-              value={newCoupon.discountValue}
-              onChange={(event) =>
-                setNewCoupon((prev) => ({ ...prev, discountValue: event.target.value }))
-              }
-              required
-            />
-          </label>
-
-          <label>
-            Min Order Amount
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={newCoupon.minOrderAmount}
-              onChange={(event) =>
-                setNewCoupon((prev) => ({ ...prev, minOrderAmount: event.target.value }))
-              }
-            />
-          </label>
-
-          <label>
-            Expires At (Optional)
-            <input
-              type="date"
-              value={newCoupon.expiresAt}
-              onChange={(event) =>
-                setNewCoupon((prev) => ({ ...prev, expiresAt: event.target.value }))
-              }
-            />
-          </label>
-
-          <label className="admin-full-span">
-            Description
-            <input
-              value={newCoupon.description}
-              onChange={(event) =>
-                setNewCoupon((prev) => ({ ...prev, description: event.target.value }))
-              }
-            />
-          </label>
-
-          <div className="admin-form-actions admin-full-span">
-            <button className="btn" type="submit" disabled={creatingCoupon}>
-              {creatingCoupon ? "Creating coupon..." : "Add Coupon"}
+          </div>
+          <div className="col-span-2 sm:col-span-3">
+            <label className={LABEL}>Description</label>
+            <input className={FIELD} value={newCoupon.description} onChange={(e) => setNewCoupon((c) => ({ ...c, description: e.target.value }))} />
+          </div>
+          <div className="col-span-2 sm:col-span-3">
+            <button type="submit" disabled={creatingCoupon} className="btn-primary text-xs px-5 py-2.5">
+              {creatingCoupon ? "Creating…" : "Add Coupon"}
             </button>
           </div>
         </form>
 
-        <div className="admin-toolbar">
-          <input
-            className="search-input"
-            placeholder="Search coupon code or description"
-            value={couponSearch}
-            onChange={(event) => setCouponSearch(event.target.value)}
-          />
-          <select
-            className="select"
-            value={couponFilter}
-            onChange={(event) =>
-              setCouponFilter(event.target.value as "all" | "active" | "inactive" | "expiring")
-            }
-          >
-            <option value="all">All coupons</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="expiring">Expiring in 14 days</option>
+        <div className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-light pointer-events-none" />
+            <input className={cn(FIELD, "pl-8")} placeholder="Search coupons…" value={couponSearch} onChange={(e) => setCouponSearch(e.target.value)} />
+          </div>
+          <select className={cn(FIELD, "w-44")} value={couponFilter} onChange={(e) => setCouponFilter(e.target.value as "all"|"active"|"inactive"|"expiring")}>
+            <option value="all">All</option><option value="active">Active</option>
+            <option value="inactive">Inactive</option><option value="expiring">Expiring soon</option>
           </select>
         </div>
 
-        {filteredCoupons.length === 0 && <div className="page-state">No coupons match your filters.</div>}
-
+        {filteredCoupons.length === 0 && <p className="text-sm text-charcoal-muted">No coupons match filters.</p>}
         {filteredCoupons.length > 0 && (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Discount</th>
-                  <th>Min Order</th>
-                  <th>Expires</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr><th className={TH}>Code</th><th className={TH}>Discount</th><th className={TH}>Min Order</th><th className={TH}>Expires</th><th className={TH}>Status</th><th className={TH}>Actions</th></tr></thead>
               <tbody>
-                {filteredCoupons.map((coupon) => (
-                  <tr key={coupon.id}>
-                    <td>
-                      <code className="admin-code">{coupon.code}</code>
-                      {coupon.description ? <small> - {coupon.description}</small> : null}
-                    </td>
-                    <td>
-                      {coupon.discountType === "percent"
-                        ? `${coupon.discountValue}%`
-                        : formatCurrency(coupon.discountValue)}
-                    </td>
-                    <td>{formatCurrency(coupon.minOrderAmount)}</td>
-                    <td>{coupon.expiresAt ? new Date(coupon.expiresAt).toLocaleDateString() : "Never"}</td>
-                    <td>
-                      <span className={coupon.isActive ? "admin-status-pill status-active" : "admin-status-pill status-inactive"}>
-                        {coupon.isActive ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="admin-row-actions">
-                        <button
-                          className="btn btn-small"
-                          type="button"
-                          onClick={() => toggleCouponStatus(coupon)}
-                          disabled={savingCouponId === coupon.id}
-                        >
-                          {savingCouponId === coupon.id
-                            ? "Updating..."
-                            : coupon.isActive
-                              ? "Deactivate"
-                              : "Activate"}
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-small"
-                          type="button"
-                          onClick={() => deleteCoupon(coupon)}
-                          disabled={deletingCouponId === coupon.id}
-                        >
-                          {deletingCouponId === coupon.id ? "Deleting..." : "Delete"}
-                        </button>
+                {filteredCoupons.map((c) => (
+                  <tr key={c.id} className="hover:bg-stone/50">
+                    <td className={TD}><code className="font-mono text-xs bg-stone px-1.5 py-0.5 rounded">{c.code}</code>{c.description && <span className="text-xs text-charcoal-muted ml-1">— {c.description}</span>}</td>
+                    <td className={TD}>{c.discountType === "percent" ? `${c.discountValue}%` : formatCurrency(c.discountValue)}</td>
+                    <td className={TD}>{formatCurrency(c.minOrderAmount)}</td>
+                    <td className={TD}>{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "Never"}</td>
+                    <td className={TD}><StatusPill status={c.isActive ? "active" : "inactive"} /></td>
+                    <td className={TD}>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => toggleCouponStatus(c)} disabled={savingCouponId === c.id} className="btn-primary px-3 py-1.5 text-xs">{savingCouponId === c.id ? "…" : c.isActive ? "Deactivate" : "Activate"}</button>
+                        <button onClick={() => deleteCoupon(c)} disabled={deletingCouponId === c.id} className="btn-outline px-3 py-1.5 text-xs text-error border-error/30 hover:border-error">{deletingCouponId === c.id ? "…" : "Delete"}</button>
                       </div>
                     </td>
                   </tr>
@@ -1359,7 +691,7 @@ export function AdminPage() {
             </table>
           </div>
         )}
-      </article>
-    </section>
+      </div>
+    </div>
   );
 }

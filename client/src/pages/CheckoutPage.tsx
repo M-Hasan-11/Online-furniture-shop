@@ -1,32 +1,30 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { Tag, CheckCircle2 } from "lucide-react";
 import { useCart } from "../contexts/CartContext";
 import api from "../lib/api";
 import type { CouponValidation } from "../lib/types";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 const FREE_SHIPPING_THRESHOLD = 1000;
 const DEFAULT_SHIPPING_FEE = 49;
 
 function extractApiMessage(error: unknown, fallback: string): string {
   if (
-    error &&
-    typeof error === "object" &&
-    "response" in error &&
-    error.response &&
-    typeof error.response === "object" &&
-    "data" in error.response &&
-    error.response.data &&
-    typeof error.response.data === "object" &&
-    "message" in error.response.data &&
+    error && typeof error === "object" && "response" in error &&
+    error.response && typeof error.response === "object" && "data" in error.response &&
+    error.response.data && typeof error.response.data === "object" && "message" in error.response.data &&
     typeof error.response.data.message === "string"
   ) {
     return error.response.data.message;
   }
-
   return fallback;
 }
 
 export function CheckoutPage() {
+  usePageMeta("Checkout");
+
   const { items, subtotal, clearCart } = useCart();
   const navigate = useNavigate();
 
@@ -38,185 +36,213 @@ export function CheckoutPage() {
   const [notes, setNotes] = useState("");
   const [couponCode, setCouponCode] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<CouponValidation | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [couponNotice, setCouponNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
 
   const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : DEFAULT_SHIPPING_FEE;
   const discount = appliedCoupon?.discountAmount ?? 0;
-  const total = useMemo(
-    () => Math.max(0, subtotal + shipping - discount),
-    [discount, shipping, subtotal]
-  );
+  const total = useMemo(() => Math.max(0, subtotal + shipping - discount), [discount, shipping, subtotal]);
 
   const applyCoupon = async () => {
-    if (!couponCode.trim()) {
-      setCouponNotice("Enter a coupon code first.");
-      setAppliedCoupon(null);
-      return;
-    }
-
-    if (subtotal <= 0) {
-      setCouponNotice("Add items to your cart before applying a coupon.");
-      setAppliedCoupon(null);
-      return;
-    }
-
+    if (!couponCode.trim()) { toast.error("Enter a coupon code first."); return; }
+    if (subtotal <= 0) { toast.error("Add items to your cart first."); return; }
     try {
       setApplyingCoupon(true);
-      setCouponNotice(null);
       const { data } = await api.get<CouponValidation>("/coupons/validate", {
-        params: {
-          code: couponCode.trim(),
-          subtotal,
-        },
+        params: { code: couponCode.trim(), subtotal },
       });
-
       setAppliedCoupon(data);
       setCouponCode(data.coupon.code);
-      setCouponNotice(`Applied ${data.coupon.code}: -$${data.discountAmount.toFixed(2)}`);
+      toast.success(`Coupon applied: -$${data.discountAmount.toFixed(2)}`);
     } catch (err) {
       setAppliedCoupon(null);
-      setCouponNotice(extractApiMessage(err, "Could not apply coupon."));
+      toast.error(extractApiMessage(err, "Could not apply coupon."));
     } finally {
       setApplyingCoupon(false);
     }
   };
 
-  const onSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-
-    if (items.length === 0) {
-      setError("Your cart is empty.");
-      return;
-    }
-
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (items.length === 0) { toast.error("Your cart is empty."); return; }
     try {
       setSubmitting(true);
-      setError(null);
-
-      const shippingAddress = `${fullName}, ${email}, ${address}, ${city}, ${zip}. Notes: ${notes || "None"}`;
-
+      const shippingAddress = `${fullName}, ${email}, ${address}, ${city}, ${zip}${notes ? `. Notes: ${notes}` : ""}`;
       await api.post("/orders", {
-        items: items.map((item) => ({
-          productId: item.product.id,
-          quantity: item.quantity,
-        })),
+        items: items.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
         shippingAddress,
         couponCode: couponCode.trim() || undefined,
       });
-
       clearCart();
+      toast.success("Order placed successfully!");
       navigate("/account", { replace: true });
     } catch (err) {
-      setError(extractApiMessage(err, "Checkout failed. Please verify your details and try again."));
+      toast.error(extractApiMessage(err, "Checkout failed. Please try again."));
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <section className="container section cart-layout">
-      <form className="checkout-form reveal" onSubmit={onSubmit}>
-        <h1>Checkout</h1>
+    <div className="max-w-[1200px] mx-auto px-6 py-12">
+      <h1 className="font-serif text-[clamp(1.8rem,3vw,2.6rem)] text-charcoal tracking-tight mb-10">
+        Checkout
+      </h1>
 
-        <label>
-          Full Name
-          <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
-        </label>
+      <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_0.6fr] gap-10 items-start">
+        {/* Shipping form */}
+        <form onSubmit={onSubmit} className="flex flex-col gap-6">
+          <div>
+            <h2 className="font-serif text-xl text-charcoal mb-5">Shipping Details</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <label className="form-label" htmlFor="fullName">Full Name</label>
+                <input
+                  id="fullName"
+                  className="form-input"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                  placeholder="Jane Smith"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="form-label" htmlFor="email">Email Address</label>
+                <input
+                  id="email"
+                  type="email"
+                  className="form-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  placeholder="jane@example.com"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="form-label" htmlFor="address">Street Address</label>
+                <input
+                  id="address"
+                  className="form-input"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  required
+                  placeholder="123 Maple Street"
+                />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="city">City</label>
+                <input
+                  id="city"
+                  className="form-input"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  required
+                  placeholder="New York"
+                />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="zip">ZIP Code</label>
+                <input
+                  id="zip"
+                  className="form-input"
+                  value={zip}
+                  onChange={(e) => setZip(e.target.value)}
+                  required
+                  placeholder="10001"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="form-label" htmlFor="notes">Delivery Notes <span className="text-charcoal-light font-normal">(Optional)</span></label>
+                <textarea
+                  id="notes"
+                  className="form-input resize-none"
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Leave at door, ring bell, etc."
+                />
+              </div>
+            </div>
+          </div>
 
-        <label>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </label>
+          {/* Coupon */}
+          <div>
+            <h2 className="font-serif text-xl text-charcoal mb-4">Promo Code</h2>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Tag size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-charcoal-light pointer-events-none" />
+                <input
+                  className="form-input pl-9"
+                  placeholder="Enter promo code"
+                  value={couponCode}
+                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                />
+              </div>
+              <button type="button" onClick={applyCoupon} disabled={applyingCoupon} className="btn-outline shrink-0 px-5">
+                {applyingCoupon ? "Applying…" : "Apply"}
+              </button>
+            </div>
+            {appliedCoupon && (
+              <div className="flex items-center gap-2 mt-2 text-sm text-success">
+                <CheckCircle2 size={14} />
+                <span>{appliedCoupon.coupon.code}: -{`$${appliedCoupon.discountAmount.toFixed(2)}`} discount applied</span>
+              </div>
+            )}
+          </div>
 
-        <label>
-          Street Address
-          <input value={address} onChange={(event) => setAddress(event.target.value)} required />
-        </label>
-
-        <label>
-          City
-          <input value={city} onChange={(event) => setCity(event.target.value)} required />
-        </label>
-
-        <label>
-          ZIP Code
-          <input value={zip} onChange={(event) => setZip(event.target.value)} required />
-        </label>
-
-        <label>
-          Delivery Notes (Optional)
-          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
-        </label>
-
-        <div className="coupon-row">
-          <input
-            placeholder="Coupon code"
-            value={couponCode}
-            onChange={(event) => setCouponCode(event.target.value.toUpperCase())}
-          />
-          <button
-            className="btn btn-secondary"
-            type="button"
-            onClick={applyCoupon}
-            disabled={applyingCoupon}
-          >
-            {applyingCoupon ? "Applying..." : "Apply"}
+          <button type="submit" disabled={submitting} className="btn-primary">
+            {submitting ? "Placing Order…" : `Place Order — $${total.toFixed(2)}`}
           </button>
-        </div>
+        </form>
 
-        {couponNotice && (
-          <p className={appliedCoupon ? "coupon-success" : "form-error"}>{couponNotice}</p>
-        )}
+        {/* Order summary sidebar */}
+        <aside className="sticky top-28 bg-white rounded-2xl border border-warm-gray p-6 flex flex-col gap-4"
+          style={{ boxShadow: "var(--shadow-soft)" }}>
+          <h2 className="font-serif text-xl text-charcoal">Your Items</h2>
 
-        {error && <p className="form-error">{error}</p>}
+          <div className="flex flex-col gap-3">
+            {items.map((item) => (
+              <div key={item.product.id} className="flex items-center gap-3">
+                <img
+                  src={item.product.image}
+                  alt={item.product.name}
+                  className="w-10 h-10 rounded-lg object-cover bg-stone shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-charcoal truncate">{item.product.name}</p>
+                  <p className="text-xs text-charcoal-muted">×{item.quantity}</p>
+                </div>
+                <span className="text-xs font-medium text-charcoal shrink-0">
+                  ${(item.product.price * item.quantity).toFixed(2)}
+                </span>
+              </div>
+            ))}
+          </div>
 
-        <button type="submit" className="btn" disabled={submitting}>
-          {submitting ? "Placing order..." : `Place Order - $${total.toFixed(2)}`}
-        </button>
-      </form>
-
-      <aside className="order-summary reveal">
-        <h2>Your Items</h2>
-        {items.map((item) => (
-          <p key={item.product.id}>
-            <span>
-              {item.product.name} x {item.quantity}
-            </span>
-            <strong>${(item.product.price * item.quantity).toFixed(2)}</strong>
-          </p>
-        ))}
-
-        <p>
-          <span>Subtotal</span>
-          <strong>${subtotal.toFixed(2)}</strong>
-        </p>
-        <p>
-          <span>Shipping</span>
-          <strong>{shipping === 0 ? "Free" : `$${shipping.toFixed(2)}`}</strong>
-        </p>
-        <p>
-          <span>Discount</span>
-          <strong>{discount > 0 ? `-$${discount.toFixed(2)}` : "$0.00"}</strong>
-        </p>
-        {appliedCoupon && (
-          <p>
-            <span>Coupon</span>
-            <strong>{appliedCoupon.coupon.code}</strong>
-          </p>
-        )}
-        <p className="summary-total">
-          <span>Total</span>
-          <strong>${total.toFixed(2)}</strong>
-        </p>
-      </aside>
-    </section>
+          <div className="flex flex-col gap-2.5 text-sm border-t border-warm-gray pt-4">
+            <div className="flex justify-between">
+              <span className="text-charcoal-muted">Subtotal</span>
+              <span className="text-charcoal">${subtotal.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-charcoal-muted">Shipping</span>
+              <span className={shipping === 0 ? "text-success" : "text-charcoal"}>
+                {shipping === 0 ? "Free" : `$${shipping.toFixed(2)}`}
+              </span>
+            </div>
+            {discount > 0 && (
+              <div className="flex justify-between text-success">
+                <span>Discount</span>
+                <span>-${discount.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between pt-3 border-t border-warm-gray">
+              <span className="font-semibold text-charcoal">Total</span>
+              <span className="font-serif text-xl text-charcoal">${total.toFixed(2)}</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
   );
 }
