@@ -37,10 +37,8 @@ export function HomePage() {
       try {
         setLoading(true);
         setError(null);
-        const { data } = await api.get<{ products: Product[] }>("/products", {
-          params: { category: selectedCategory, sort, search: search.trim() || undefined },
-        });
-        setProducts(data.products);
+        const data = await getProducts({ category: selectedCategory, sort, search: search.trim() || undefined });
+        setProducts(data);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load products.");
       } finally {
@@ -53,9 +51,9 @@ export function HomePage() {
   useEffect(() => {
     const loadRec = async () => {
       try {
-        const { data } = await api.get<{ products: Product[]; reason: string }>("/recommendations");
-        setRecommendedProducts(data.products.slice(0, 4));
-        setRecommendationReason(data.reason || "Popular picks for your home");
+        const rec = await getRecommendations(user ? String(user.id) : undefined);
+        setRecommendedProducts(rec.products.slice(0, 4));
+        setRecommendationReason(rec.reason || "Popular picks for your home");
       } catch {
         setRecommendedProducts([]);
       }

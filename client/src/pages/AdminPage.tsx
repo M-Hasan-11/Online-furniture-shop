@@ -11,7 +11,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import api from "../lib/api";
+import {
+  getAdminSummary, getAdminOrders, getAdminProducts, getAdminCoupons,
+  updateOrderStatus as dbUpdateOrderStatus,
+  updateProduct as dbUpdateProduct, createProduct as dbCreateProduct, deleteProduct as dbDeleteProduct,
+  createCoupon as dbCreateCoupon, updateCoupon as dbUpdateCoupon, deleteCoupon as dbDeleteCoupon,
+} from "../lib/db";
 import type { AdminOrder, AdminSummary, Coupon, Product } from "../lib/types";
 import { usePageMeta } from "../hooks/usePageMeta";
 import { cn } from "../lib/cn";
@@ -23,14 +28,6 @@ const EMPTY_SUMMARY: AdminSummary = {
   userCount: 0, productCount: 0, couponCount: 0, activeCoupons: 0,
   orderCount: 0, processingOrders: 0, lowStockProducts: 0, totalRevenue: 0,
 };
-
-interface SummaryResponse { summary: AdminSummary; recentOrders: AdminOrder[]; }
-interface OrdersResponse { orders: AdminOrder[]; }
-interface ProductsResponse { products: Product[]; }
-interface CouponsResponse { coupons: Coupon[]; }
-interface UpdateOrderResponse { order: AdminOrder; }
-interface ProductResponse { product: Product; }
-interface CouponResponse { coupon: Coupon; }
 
 interface ProductDraft { price: string; stock: string; isFeatured: "0" | "1"; }
 
@@ -65,16 +62,6 @@ function buildDrafts(products: Product[]): Record<number, ProductDraft> {
     drafts[p.id] = { price: String(p.price), stock: String(p.stock), isFeatured: featuredFlag(p.isFeatured) };
   }
   return drafts;
-}
-
-function extractApiMessage(error: unknown, fallback: string): string {
-  if (
-    error && typeof error === "object" && "response" in error &&
-    error.response && typeof error.response === "object" && "data" in error.response &&
-    error.response.data && typeof error.response.data === "object" && "message" in error.response.data &&
-    typeof error.response.data.message === "string"
-  ) return error.response.data.message;
-  return fallback;
 }
 
 function formatCurrency(v: number) { return `$${v.toFixed(2)}`; }
@@ -128,29 +115,29 @@ export function AdminPage() {
   const [couponFilter, setCouponFilter] = useState<"all" | "active" | "inactive" | "expiring">("all");
 
   const loadSummary = async () => {
-    const { data } = await api.get<SummaryResponse>("/admin/summary");
-    setSummary(data.summary);
-    setRecentOrders(data.recentOrders);
+    const { summary: s, recentOrders: ro } = await getAdminSummary();
+    setSummary(s);
+    setRecentOrders(ro);
   };
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
-        const [summaryRes, ordersRes, productsRes, couponsRes] = await Promise.all([
-          api.get<SummaryResponse>("/admin/summary"),
-          api.get<OrdersResponse>("/admin/orders"),
-          api.get<ProductsResponse>("/admin/products"),
-          api.get<CouponsResponse>("/admin/coupons"),
+        const [{ summary: s, recentOrders: ro }, allOrders, allProducts, allCoupons] = await Promise.all([
+          getAdminSummary(),
+          getAdminOrders(),
+          getAdminProducts(),
+          getAdminCoupons(),
         ]);
-        setSummary(summaryRes.data.summary);
-        setRecentOrders(summaryRes.data.recentOrders);
-        setOrders(ordersRes.data.orders);
-        setProducts(productsRes.data.products);
-        setCoupons(couponsRes.data.coupons);
-        setProductDrafts(buildDrafts(productsRes.data.products));
+        setSummary(s);
+        setRecentOrders(ro);
+        setOrders(allOrders);
+        setProducts(allProducts);
+        setCoupons(allCoupons);
+        setProductDrafts(buildDrafts(allProducts));
       } catch (err) {
-        toast.error(extractApiMessage(err, "Failed to load admin dashboard."));
+        toast.error(err instanceof Error ? err.message : "Failed to load admin dashboard.");
       } finally {
         setLoading(false);
       }
@@ -240,13 +227,13 @@ export function AdminPage() {
   const updateOrderStatus = async (orderId: number, status: string) => {
     try {
       setUpdatingOrderId(orderId);
-      const { data } = await api.patch<UpdateOrderResponse>(`/admin/orders/${orderId}/status`, { status });
-      setOrders((prev) => prev.map((o) => (o.id === orderId ? data.order : o)));
-      setRecentOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: data.order.status } : o)));
+      const updated = await dbUpdateOrderStatus(orderId, status);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+      setRecentOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: updated.status } : o)));
       await loadSummary();
       toast.success(`Order #${orderId} updated to ${status}.`);
     } catch (err) {
-      toast.error(extractApiMessage(err, "Could not update order status."));
+      toast.error(err instanceof Error ? err.message : "Could not update order status.");
     } finally {
       setUpdatingOrderId(null);
     }
@@ -264,18 +251,16 @@ export function AdminPage() {
     if (!Number.isInteger(stock) || stock < 0) { toast.error("Stock must be >= 0."); return; }
     try {
       setSavingProductId(productId);
-      const { data } = await api.patch<ProductResponse>(`/admin/products/${productId}`, {
-        price, stock, isFeatured: draft.isFeatured === "1",
-      });
-      setProducts((prev) => prev.map((p) => (p.id === productId ? data.product : p)));
+      const updated = await dbUpdateProduct(productId, { price, stock, isFeatured: draft.isFeatured === "1" });
+      setProducts((prev) => prev.map((p) => (p.id === productId ? updated : p)));
       setProductDrafts((prev) => ({ ...prev, [productId]: {
-        price: String(data.product.price), stock: String(data.product.stock),
-        isFeatured: featuredFlag(data.product.isFeatured),
+        price: String(updated.price), stock: String(updated.stock),
+        isFeatured: featuredFlag(updated.isFeatured),
       }}));
       await loadSummary();
-      toast.success(`Saved ${data.product.name}.`);
+      toast.success(`Saved ${updated.name}.`);
     } catch (err) {
-      toast.error(extractApiMessage(err, "Could not update product."));
+      toast.error(err instanceof Error ? err.message : "Could not update product.");
     } finally {
       setSavingProductId(null);
     }
@@ -287,13 +272,13 @@ export function AdminPage() {
     if (!window.confirm(`Delete "${target.name}"? This cannot be undone.`)) return;
     try {
       setDeletingProductId(productId);
-      await api.delete(`/admin/products/${productId}`);
+      await dbDeleteProduct(productId);
       setProducts((prev) => prev.filter((p) => p.id !== productId));
       setProductDrafts((prev) => { const n = { ...prev }; delete n[productId]; return n; });
       await loadSummary();
       toast.success(`Deleted ${target.name}.`);
     } catch (err) {
-      toast.error(extractApiMessage(err, "Could not delete product."));
+      toast.error(err instanceof Error ? err.message : "Could not delete product.");
     } finally {
       setDeletingProductId(null);
     }
@@ -307,19 +292,19 @@ export function AdminPage() {
     if (!Number.isFinite(rating) || rating < 0 || rating > 5) { toast.error("Rating must be 0–5."); return; }
     try {
       setCreatingProduct(true);
-      const { data } = await api.post<ProductResponse>("/admin/products", {
+      const created = await dbCreateProduct({
         ...newProduct, price, stock, rating, isFeatured: newProduct.isFeatured === "1",
       });
-      setProducts((prev) => [data.product, ...prev]);
-      setProductDrafts((prev) => ({ ...prev, [data.product.id]: {
-        price: String(data.product.price), stock: String(data.product.stock),
-        isFeatured: featuredFlag(data.product.isFeatured),
+      setProducts((prev) => [created, ...prev]);
+      setProductDrafts((prev) => ({ ...prev, [created.id]: {
+        price: String(created.price), stock: String(created.stock),
+        isFeatured: featuredFlag(created.isFeatured),
       }}));
       setNewProduct(DEFAULT_PRODUCT_FORM);
       await loadSummary();
-      toast.success(`Created ${data.product.name}.`);
+      toast.success(`Created ${created.name}.`);
     } catch (err) {
-      toast.error(extractApiMessage(err, "Could not create product."));
+      toast.error(err instanceof Error ? err.message : "Could not create product.");
     } finally {
       setCreatingProduct(false);
     }
@@ -334,17 +319,17 @@ export function AdminPage() {
     if (!Number.isFinite(minOrderAmount) || minOrderAmount < 0) { toast.error("Min order must be >= 0."); return; }
     try {
       setCreatingCoupon(true);
-      const { data } = await api.post<CouponResponse>("/admin/coupons", {
+      const created = await dbCreateCoupon({
         code: newCoupon.code, description: newCoupon.description || null,
         discountType: newCoupon.discountType, discountValue, minOrderAmount,
         expiresAt: newCoupon.expiresAt || null,
       });
-      setCoupons((prev) => [data.coupon, ...prev]);
+      setCoupons((prev) => [created, ...prev]);
       setNewCoupon(DEFAULT_COUPON_FORM);
       await loadSummary();
-      toast.success(`Created coupon ${data.coupon.code}.`);
+      toast.success(`Created coupon ${created.code}.`);
     } catch (err) {
-      toast.error(extractApiMessage(err, "Could not create coupon."));
+      toast.error(err instanceof Error ? err.message : "Could not create coupon.");
     } finally {
       setCreatingCoupon(false);
     }
@@ -353,14 +338,12 @@ export function AdminPage() {
   const toggleCouponStatus = async (coupon: Coupon) => {
     try {
       setSavingCouponId(coupon.id);
-      const { data } = await api.patch<CouponResponse>(`/admin/coupons/${coupon.id}`, {
-        isActive: coupon.isActive ? 0 : 1,
-      });
-      setCoupons((prev) => prev.map((c) => (c.id === coupon.id ? data.coupon : c)));
+      const updated = await dbUpdateCoupon(coupon.id, { isActive: !coupon.isActive });
+      setCoupons((prev) => prev.map((c) => (c.id === coupon.id ? updated : c)));
       await loadSummary();
-      toast.success(`${data.coupon.code} is now ${data.coupon.isActive ? "active" : "inactive"}.`);
+      toast.success(`${updated.code} is now ${updated.isActive ? "active" : "inactive"}.`);
     } catch (err) {
-      toast.error(extractApiMessage(err, "Could not update coupon."));
+      toast.error(err instanceof Error ? err.message : "Could not update coupon.");
     } finally {
       setSavingCouponId(null);
     }
@@ -370,12 +353,12 @@ export function AdminPage() {
     if (!window.confirm(`Delete coupon ${coupon.code}?`)) return;
     try {
       setDeletingCouponId(coupon.id);
-      await api.delete(`/admin/coupons/${coupon.id}`);
+      await dbDeleteCoupon(coupon.id);
       setCoupons((prev) => prev.filter((c) => c.id !== coupon.id));
       await loadSummary();
       toast.success(`Deleted coupon ${coupon.code}.`);
     } catch (err) {
-      toast.error(extractApiMessage(err, "Could not delete coupon."));
+      toast.error(err instanceof Error ? err.message : "Could not delete coupon.");
     } finally {
       setDeletingCouponId(null);
     }

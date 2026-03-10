@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LogOut, Package, ShoppingBag } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
-import api from "../lib/api";
+import { getOrders } from "../lib/db";
 import type { Order } from "../lib/types";
 import { usePageMeta } from "../hooks/usePageMeta";
 
@@ -32,8 +32,8 @@ export function AccountPage() {
     const load = async () => {
       try {
         setLoading(true);
-        const { data } = await api.get<{ orders: Order[] }>("/orders");
-        setOrders(data.orders);
+        const data = await getOrders(String(user?.id));
+        setOrders(data);
       } catch {
         setOrders([]);
       } finally {

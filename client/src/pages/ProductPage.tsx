@@ -10,25 +10,6 @@ import api from "../lib/api";
 import type { Product } from "../lib/types";
 import { usePageMeta } from "../hooks/usePageMeta";
 
-interface Review {
-  id: number;
-  productId: number;
-  userId: number;
-  userName: string;
-  rating: number;
-  comment: string;
-  createdAt: string;
-}
-
-function extractApiMessage(error: unknown, fallback: string): string {
-  if (
-    error && typeof error === "object" && "response" in error &&
-    error.response && typeof error.response === "object" && "data" in error.response &&
-    error.response.data && typeof error.response.data === "object" && "message" in error.response.data &&
-    typeof error.response.data.message === "string"
-  ) {
-    return error.response.data.message;
-  }
   return fallback;
 }
 
@@ -87,12 +68,12 @@ export function ProductPage() {
       try {
         setLoading(true);
         setError(null);
-        const [pRes, rRes] = await Promise.all([
-          api.get<{ product: Product }>(`/products/${id}`),
-          api.get<{ reviews: Review[] }>(`/products/${id}/reviews`),
+        const [product, reviews] = await Promise.all([
+          getProduct(Number(id)),
+          getReviews(Number(id)),
         ]);
-        setProduct(pRes.data.product);
-        setReviews(rRes.data.reviews);
+        setProduct(product);
+        setReviews(reviews);
       } catch {
         setError("Product not found.");
       } finally {
@@ -136,20 +117,17 @@ export function ProductPage() {
     if (reviewComment.trim().length < 3) { toast.error("Comment must be at least 3 characters."); return; }
     try {
       setReviewSubmitting(true);
-      const { data } = await api.post<{ review: Review }>(`/products/${product.id}/reviews`, {
-        rating: reviewRating,
-        comment: reviewComment.trim(),
-      });
+      const review = await upsertReview(product.id, String(user.id), reviewRating, reviewComment.trim());
       setReviews((prev) => {
-        const exists = prev.some((r) => r.id === data.review.id);
-        if (exists) return prev.map((r) => (r.id === data.review.id ? data.review : r));
-        return [data.review, ...prev];
+        const exists = prev.some((r) => r.id === review.id);
+        if (exists) return prev.map((r) => (r.id === review.id ? review : r));
+        return [review, ...prev];
       });
-      const refreshed = await api.get<{ product: Product }>(`/products/${product.id}`);
-      setProduct(refreshed.data.product);
+      const refreshedProduct = await getProduct(product.id);
+      setProduct(refreshedProduct);
       toast.success(ownReview ? "Review updated." : "Thanks for your review!");
     } catch (err) {
-      toast.error(extractApiMessage(err, "Unable to submit review."));
+      toast.error(err instanceof Error ? err.message : "Unable to submit review.");
     } finally {
       setReviewSubmitting(false);
     }

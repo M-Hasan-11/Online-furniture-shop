@@ -3,29 +3,19 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Tag, CheckCircle2 } from "lucide-react";
 import { useCart } from "../contexts/CartContext";
-import api from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
+import { validateCoupon, createOrder } from "../lib/db";
 import type { CouponValidation } from "../lib/types";
 import { usePageMeta } from "../hooks/usePageMeta";
 
 const FREE_SHIPPING_THRESHOLD = 1000;
 const DEFAULT_SHIPPING_FEE = 49;
 
-function extractApiMessage(error: unknown, fallback: string): string {
-  if (
-    error && typeof error === "object" && "response" in error &&
-    error.response && typeof error.response === "object" && "data" in error.response &&
-    error.response.data && typeof error.response.data === "object" && "message" in error.response.data &&
-    typeof error.response.data.message === "string"
-  ) {
-    return error.response.data.message;
-  }
-  return fallback;
-}
-
 export function CheckoutPage() {
   usePageMeta("Checkout");
 
   const { items, subtotal, clearCart } = useCart();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [fullName, setFullName] = useState("");
@@ -48,15 +38,13 @@ export function CheckoutPage() {
     if (subtotal <= 0) { toast.error("Add items to your cart first."); return; }
     try {
       setApplyingCoupon(true);
-      const { data } = await api.get<CouponValidation>("/coupons/validate", {
-        params: { code: couponCode.trim(), subtotal },
-      });
+      const data = await validateCoupon(couponCode.trim(), subtotal);
       setAppliedCoupon(data);
       setCouponCode(data.coupon.code);
       toast.success(`Coupon applied: -$${data.discountAmount.toFixed(2)}`);
     } catch (err) {
       setAppliedCoupon(null);
-      toast.error(extractApiMessage(err, "Could not apply coupon."));
+      toast.error(err instanceof Error ? err.message : "Could not apply coupon.");
     } finally {
       setApplyingCoupon(false);
     }
@@ -68,7 +56,8 @@ export function CheckoutPage() {
     try {
       setSubmitting(true);
       const shippingAddress = `${fullName}, ${email}, ${address}, ${city}, ${zip}${notes ? `. Notes: ${notes}` : ""}`;
-      await api.post("/orders", {
+      await createOrder({
+        userId: String(user!.id),
         items: items.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
         shippingAddress,
         couponCode: couponCode.trim() || undefined,
@@ -77,7 +66,7 @@ export function CheckoutPage() {
       toast.success("Order placed successfully!");
       navigate("/account", { replace: true });
     } catch (err) {
-      toast.error(extractApiMessage(err, "Checkout failed. Please try again."));
+      toast.error(err instanceof Error ? err.message : "Checkout failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
