@@ -54,10 +54,11 @@ create table if not exists orders (
   discount_amount  numeric(10,2) not null default 0,
   coupon_code      text,
   total            numeric(10,2) not null,
-  status           text          not null default 'processing'
-                     check (status in ('processing','shipped','delivered','cancelled','payment_failed')),
-  shipping_address text          not null,
-  created_at       timestamptz   not null default now()
+  status                    text          not null default 'processing'
+                              check (status in ('processing','shipped','delivered','cancelled','pending_payment','payment_failed')),
+  shipping_address          text          not null,
+  stripe_payment_intent_id  text,
+  created_at                timestamptz   not null default now()
 );
 
 -- ── Order Items ─────────────────────────────────────────────
@@ -228,3 +229,14 @@ create or replace view admin_order_details as
   from orders o
   join profiles p on p.id = o.user_id
   join auth.users u on u.id = o.user_id;
+
+-- ── Stripe helpers ───────────────────────────────────────────
+-- Safely decrement stock (called from stripe-webhook edge function)
+create or replace function decrement_stock(p_product_id bigint, p_quantity integer)
+returns void language plpgsql security definer as $$
+begin
+  update products
+  set stock = greatest(0, stock - p_quantity)
+  where id = p_product_id;
+end;
+$$;

@@ -12,10 +12,12 @@ function StatusPill({ status }: { status: string }) {
     shipped: "status-shipped",
     delivered: "status-delivered",
     cancelled: "status-cancelled",
+    pending_payment: "status-pending_payment",
+    payment_failed: "status-payment_failed",
   };
   return (
     <span className={map[status] ?? "bg-stone text-charcoal-muted border border-warm-gray rounded-full px-2.5 py-0.5 text-xs font-medium"}>
-      {status.charAt(0).toUpperCase() + status.slice(1)}
+      {status.replace(/_/g, " ").charAt(0).toUpperCase() + status.replace(/_/g, " ").slice(1)}
     </span>
   );
 }

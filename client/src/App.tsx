@@ -12,6 +12,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProductPage } from "./pages/ProductPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { WishlistPage } from "./pages/WishlistPage";
+import { OrderConfirmationPage } from "./pages/OrderConfirmationPage";
 
 export default function App() {
   return (
@@ -48,6 +49,7 @@ export default function App() {
             </RequireAdmin>
           }
         />
+        <Route path="/order-confirmation" element={<OrderConfirmationPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

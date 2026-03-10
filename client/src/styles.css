@@ -110,6 +110,12 @@ img { display: block; max-width: 100%; }
   .status-cancelled {
     @apply bg-red-50 text-red-700 border border-red-200 rounded-full px-2.5 py-0.5 text-xs font-medium;
   }
+  .status-pending_payment {
+    @apply bg-stone text-charcoal-muted border border-warm-gray rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .status-payment_failed {
+    @apply bg-red-50 text-red-700 border border-red-200 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
   .skeleton {
     background: linear-gradient(90deg, var(--color-warm-gray) 25%, var(--color-stone-dark) 50%, var(--color-warm-gray) 75%);
     background-size: 200% 100%;

@@ -72,6 +72,7 @@ function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
     processing: "status-processing", shipped: "status-shipped",
     delivered: "status-delivered", cancelled: "status-cancelled",
+    pending_payment: "status-pending_payment", payment_failed: "status-payment_failed",
     active: "status-delivered", inactive: "status-cancelled",
   };
   return (
