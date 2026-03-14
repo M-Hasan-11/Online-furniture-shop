@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Tag, CheckCircle2, ArrowLeft, Lock } from "lucide-react";
 import { loadStripe } from "@stripe/stripe-js";
@@ -276,7 +275,7 @@ export function CheckoutPage() {
 
   const { items, subtotal, clearCart } = useCart();
   const { user } = useAuth();
-  const navigate = useNavigate();
+
 
   const [step, setStep] = useState<1 | 2>(1);
   const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : DEFAULT_SHIPPING_FEE;

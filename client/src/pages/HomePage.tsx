@@ -4,7 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import { ProductCard } from "../components/ProductCard";
 import { CatalogSkeleton } from "../components/Skeletons";
 import { useAuth } from "../contexts/AuthContext";
-import api from "../lib/api";
+import { getProducts, getRecommendations } from "../lib/db";
 import type { Product } from "../lib/types";
 import { usePageMeta } from "../hooks/usePageMeta";
 

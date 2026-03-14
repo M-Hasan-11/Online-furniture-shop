@@ -140,7 +140,7 @@ export async function getReviews(productId: number): Promise<Review[]> {
     .order("created_at", { ascending: false });
 
   dbErr(error, "Failed to load reviews.");
-  return (data as ReviewRow[]).map((r) => ({
+  return (data as unknown as ReviewRow[]).map((r) => ({
     id: r.id, productId: r.product_id,
     userId: r.user_id as unknown as number,
     userName: r.profiles?.name ?? "Anonymous",
@@ -159,7 +159,7 @@ export async function upsertReview(
     .single();
 
   dbErr(error, "Failed to submit review.");
-  const r = data as ReviewRow;
+  const r = data as unknown as ReviewRow;
   return {
     id: r.id, productId: r.product_id, userId: r.user_id as unknown as number,
     userName: r.profiles?.name ?? "Anonymous", rating: r.rating,
@@ -319,7 +319,7 @@ export async function getAdminSummary(): Promise<{ summary: AdminSummary; recent
 
   const products = (productsRes.data ?? []) as { id: number; stock: number }[];
   const coupons  = (couponsRes.data  ?? []) as { id: number; is_active: boolean }[];
-  const orders   = (ordersRes.data   ?? []) as AdminOrder[];
+  const orders   = (ordersRes.data   ?? []) as unknown as AdminOrder[];
 
   const totalRevenue = orders
     .filter((o) => o.status !== "cancelled")
@@ -345,7 +345,7 @@ export async function getAdminOrders(): Promise<AdminOrder[]> {
     .select("*")
     .order("created_at", { ascending: false });
   dbErr(error, "Failed to load orders.");
-  return (data ?? []) as AdminOrder[];
+  return (data ?? []) as unknown as AdminOrder[];
 }
 
 export async function getAdminProducts(): Promise<Product[]> {
@@ -376,7 +376,7 @@ export async function updateOrderStatus(orderId: number, status: string): Promis
     .select()
     .single();
   dbErr(error, "Failed to update order.");
-  return data as AdminOrder;
+  return data as unknown as AdminOrder;
 }
 
 export async function updateProduct(

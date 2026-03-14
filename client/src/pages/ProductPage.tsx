@@ -6,12 +6,9 @@ import { useAuth } from "../contexts/AuthContext";
 import { useCart } from "../contexts/CartContext";
 import { useWishlist } from "../contexts/WishlistContext";
 import { ProductDetailSkeleton } from "../components/Skeletons";
-import api from "../lib/api";
+import { getProduct, getReviews, upsertReview, type Review } from "../lib/db";
 import type { Product } from "../lib/types";
 import { usePageMeta } from "../hooks/usePageMeta";
-
-  return fallback;
-}
 
 function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [hover, setHover] = useState(0);

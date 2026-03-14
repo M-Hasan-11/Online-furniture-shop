@@ -28,6 +28,7 @@ export interface Database {
           name?: string | null;
           role?: "customer" | "admin";
         };
+        Relationships: [];
       };
       products: {
         Row: {
@@ -75,6 +76,7 @@ export interface Database {
           dimensions?: string | null;
           color?: string | null;
         };
+        Relationships: [];
       };
       orders: {
         Row: {
@@ -87,6 +89,7 @@ export interface Database {
           total: number;
           status: string;
           shipping_address: string;
+          stripe_payment_intent_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -98,12 +101,14 @@ export interface Database {
           total: number;
           status?: string;
           shipping_address: string;
+          stripe_payment_intent_id?: string | null;
           created_at?: string;
         };
         Update: {
           status?: string;
           shipping_address?: string;
         };
+        Relationships: [];
       };
       order_items: {
         Row: {
@@ -123,6 +128,22 @@ export interface Database {
           quantity?: number;
           unit_price?: number;
         };
+        Relationships: [
+          {
+            foreignKeyName: "order_items_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "order_items_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       reviews: {
         Row: {
@@ -144,6 +165,15 @@ export interface Database {
           rating?: number;
           comment?: string | null;
         };
+        Relationships: [
+          {
+            foreignKeyName: "reviews_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       wishlist_items: {
         Row: {
@@ -157,7 +187,19 @@ export interface Database {
           product_id: number;
           created_at?: string;
         };
-        Update: Record<string, never>;
+        Update: {
+          user_id?: string;
+          product_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "wishlist_items_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       coupons: {
         Row: {
@@ -189,9 +231,29 @@ export interface Database {
           is_active?: boolean;
           expires_at?: string | null;
         };
+        Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: {
+      admin_order_details: {
+        Row: {
+          id: number;
+          user_id: string;
+          customer_name: string | null;
+          customer_email: string | null;
+          subtotal: number;
+          shipping_fee: number;
+          discount_amount: number;
+          coupon_code: string | null;
+          total: number;
+          status: string;
+          shipping_address: string;
+          created_at: string;
+          item_count: number;
+        };
+        Relationships: [];
+      };
+    };
     Functions: {
       validate_coupon: {
         Args: { coupon_code: string; order_subtotal: number };
@@ -201,6 +263,10 @@ export interface Database {
           coupon_id: number | null;
           message: string;
         };
+      };
+      decrement_stock: {
+        Args: { p_product_id: number; p_quantity: number };
+        Returns: void;
       };
     };
     Enums: Record<string, never>;
